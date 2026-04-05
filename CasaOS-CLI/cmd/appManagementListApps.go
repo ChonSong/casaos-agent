@@ -27,6 +27,7 @@ import (
 	"github.com/ChonSong/casaos-agent/CasaOS-CLI/codegen/app_management"
 	"github.com/mitchellh/mapstructure"
 	"github.com/samber/lo"
+	stdjson "encoding/json"
 	"github.com/spf13/cobra"
 )
 
@@ -87,6 +88,40 @@ var appManagementListAppsCmd = &cobra.Command{
 		}
 
 		data := json.Get(buf, "data")
+
+		if JSONOutput {
+			apps := []map[string]interface{}{}
+			for _, id := range data.Keys() {
+				app := data.Get(id)
+				status := app.Get("status").ToString()
+				images := []string{}
+				compose := app.Get("compose")
+				if compose.LastError() == nil {
+					services := compose.Get("services")
+					if services.LastError() == nil {
+						for _, sid := range services.Keys() {
+							svc := services.Get(sid)
+							if svc.LastError() == nil {
+								img := svc.Get("image").ToString()
+								if img != "" {
+									images = append(images, img)
+								}
+							}
+						}
+					}
+				}
+				apps = append(apps, map[string]interface{}{
+					"app_id": id,
+					"status":  status,
+					"images":  images,
+					"source":  "local",
+				})
+			}
+			enc := stdjson.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			enc.Encode(map[string]interface{}{"apps": apps})
+			return nil
+		}
 
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 		defer w.Flush()
