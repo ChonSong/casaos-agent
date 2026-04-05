@@ -21,7 +21,9 @@ import (
 	"strings"
 
 	"github.com/ChonSong/casaos-agent/CasaOS-CLI/codegen/message_bus"
+	stdjson "encoding/json"
 	"github.com/spf13/cobra"
+	"os"
 	"golang.org/x/net/websocket"
 )
 
@@ -77,6 +79,15 @@ func subscribeWS(rootURL, messageType, sourceID, names string, bufferSize uint) 
 			log.Println(err.Error())
 		}
 
-		fmt.Println(string(output))
+		if JSONOutput {
+                    var event map[string]interface{}
+                    if err := stdjson.Unmarshal(msg, &event); err == nil {
+                        enc := stdjson.NewEncoder(os.Stdout)
+                        enc.SetIndent("", "  ")
+                        enc.Encode(event)
+                    }
+                } else {
+                    fmt.Println(string(output))
+                }
 	}
 }
