@@ -1,89 +1,49 @@
 # CasaOS Agent CLI
 
-> **Status:** Phase 1 — Scaffolded. Awaiting upstream research to wire real API calls.
+> **Status:** Phase 2 — Fork complete, real CasaOS-CLI wired with agent-native flags.  
+> GitHub: https://github.com/ChonSong/casaos-agent
 
-Agent-native CLI for managing a CasaOS instance. Forked from [IceWhaleTech/CasaOS-CLI](https://github.com/IceWhaleTech/CasaOS-CLI) with machine-readable output, non-interactive flags, and webhook registration built in.
-
-GitHub: https://github.com/ChonSong/casaos-agent
+Agent-native CLI for managing a CasaOS instance. Fork of [IceWhaleTech/CasaOS-CLI](https://github.com/IceWhaleTech/CasaOS-CLI) with machine-readable output, non-interactive flags, and streaming support built in.
 
 ## Quick Start
 
 ```bash
 # Build
-make build
+cd CasaOS-CLI && go build -o bin/casaos-agent .
 
-# Or install via Go
+# Or install
 go install github.com/ChonSong/casaos-agent@latest
 
-# List apps
-casaos-agent app list --json
+# List installed apps (JSON output)
+casaos-agent --json app-management list apps
 
-# Install an app (non-interactive)
-casaos-agent app install homeassistant --yes --watch
+# Install app (non-interactive)
+casaos-agent --yes app-management install nginx --file docker-compose.yml
 
 # System health check
-casaos-agent system health --json
+casaos-agent --json healthcheck services
 
-# Register a webhook
-casaos-agent webhook register https://agent.example.com/hooks/casaos \
-  --event casaos:system:utilization \
-  --event casaos:file:operate
-
-# Watch system utilization in real-time
-casaos-agent system utilization --watch
+# Subscribe to MessageBus events as JSON
+casaos-agent --json message-bus subscribe websocket \
+  --source-id casaos-app-management
 ```
 
-## Key Differences from upstream `CasaOS-CLI`
+## Key Differences from upstream `casaos-cli`
 
-| Feature | CasaOS-CLI | CasaOS-Agent |
-|---------|-----------|--------------|
-| Output format | Human-formatted text | JSON (default with `--json`) |
-| Interactive prompts | Yes (blocking) | Bypass with `--yes` |
-| Streaming output | No | `--watch` flag |
-| Webhook management | No | Built-in `webhook` command group |
-| Event subscription | No | `event subscribe` |
-| Error codes | No | Typed error codes in JSON |
+| Feature | `casaos-cli` | `casaos-agent` |
+|---------|-------------|----------------|
+| Output format | Human-formatted tables | **Structured JSON** (with `--json`) |
+| Interactive prompts | Yes (blocking) | **Bypass with `--yes`** |
+| Streaming output | No | **`--watch` flag** |
+| Error codes | No | Typed error codes in JSON envelope |
 
-## Command Overview
+## Agent-Native Flags
 
 ```
-casaos-agent app          # App lifecycle (list, install, start, stop, restart, inspect, logs, update)
-casaos-agent container    # Raw Docker container management
-casaos-agent system       # System info, resources, health, logs, update, restart, reboot
-casaos-agent storage      # Local storage management
-casaos-agent webhook      # Register, list, test, deregister webhooks
-casaos-agent event        # MessageBus interaction (list types, subscribe, publish)
-casaos-agent gateway      # Gateway routes and status
-```
-
-## Configuration
-
-CasaOS-Agent uses environment variables and a config file.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CASAOS_URL` | `localhost:80` | CasaOS API root URL |
-| `CASAOS_SOCKET` | `` | UNIX socket path (alternative to URL) |
-| `CASAOS_TOKEN` | `` | Bearer token for API auth |
-| `CASAOS_JSON` | `""` | Set to any value to force JSON output |
-| `CASAOS_YES` | `""` | Set to any value to skip all confirmations |
-| `CASAOS_OUTPUT` | `table` | Output format: `table`, `json`, `yaml` |
-
-### Config File
-
-`~/.config/casaos-agent/config.yaml` (optional):
-
-```yaml
-url: "localhost:80"
-socket: ""
-token: ""
-timeout: 60
-output:
-  format: "json"
-  force_json: true
-  yes: true
+--json, -j     Force structured JSON output for all commands
+--yes, -y      Skip all confirmation prompts (auto-confirm)
+--watch, -w    Stream output for long-running operations
+--url, -u      CasaOS API root URL (default: localhost:80)
 ```
 
 ## JSON Output Format
@@ -106,39 +66,77 @@ On error:
   "ok": false,
   "command": "app install",
   "error": {
-    "code": "APP_INSTALL_FAILED",
-    "message": "Docker compose validation error",
-    "details": { ... }
+    "code": "ERROR",
+    "message": "404 Not Found - is the casaos-app-management service running?"
   },
   "timestamp": "2026-04-05T17:00:00Z"
 }
 ```
 
-## Streaming (`--watch`)
+## Command Tree
 
-Long-running operations support streaming JSON lines:
-
-```json
-{"type": "status", "message": "Pulling image nginx:latest"}
-{"type": "progress", "current": 2, "total": 5}
-{"type": "done", "duration_seconds": 47}
 ```
+casaos-agent app-management    # Compose app lifecycle
+  list apps                    # GET /v2/apps/my
+  list app-stores             # GET /v2/apps/app-stores
+  search                      # Search compose app store
+  install <app>              # POST /v2/apps/my/install
+  uninstall <appid>           # DELETE /v2/apps/my/{id}
+  start <appid>              # POST /v2/apps/my/{id}/start
+  stop <appid>               # POST /v2/apps/my/{id}/stop
+  restart <appid>            # POST /v2/apps/my/{id}/restart
+  logs <appid>               # GET /v2/apps/my/{id}/logs
+  show <appid>               # GET /v2/apps/my/{id}
+
+casaos-agent message-bus      # MessageBus interaction
+  list event-types           # GET /v2/message_bus/event_type
+  subscribe websocket         # WS /v2/message_bus/subscribe/event/{source_id}
+  trigger <name>             # POST /v2/message_bus/action/{source_id}/{name}
+
+casaos-agent local-storage   # Storage management
+casaos-agent healthcheck     # Service health
+casaos-agent gateway         # Gateway routes
+casaos-agent user            # User management
+```
+
+## Complete Event Catalog
+
+When subscribing to the MessageBus (`message-bus subscribe websocket`), CasaOS emits:
+
+**App lifecycle** (source: `casaos-app-management`):
+`app:install-{begin,progress,end,error}`, `app:uninstall-{begin,end,error}`, `app:update-{begin,end,error}`, `app:apply-changes-{begin,end,error}`, `app:{start,stop,restart}-{begin,end,error}`
+
+**Docker image** (source: `casaos-app-management`):
+`docker:image:pull-{begin,progress,end,error}`, `docker:image:remove-{begin,end,error}`
+
+**Docker container** (source: `casaos-app-management`):
+`docker:container:{create,start,stop,rename,remove}-{begin,end,error}`
+
+**System** (source: `casaos`):
+`casaos:system:utilization`, `casaos:file:operate`, `casaos:file:recover`
 
 ## Architecture
 
 ```
-cmd/casaos-agent/main.go       # Entry point
-internal/
-  cli/           # Cobra command definitions
-  client/        # HTTP / UNIX socket client (TODO)
-  output/        # JSON response formatters + streaming
-  config/        # Config loading from env + yaml
+casaos-agent/
+├── CasaOS-CLI/           # Fork of upstream CasaOS-CLI
+│   ├── main.go           # Entry point → cmd.Execute()
+│   ├── cmd/              # All Cobra commands (forked + modified)
+│   │   ├── root.go       # Root cmd + agent-native flags + JSONPrintResponse
+│   │   ├── appManagement*.go  # App lifecycle commands
+│   │   ├── messageBus*.go     # MessageBus commands
+│   │   └── ...
+│   ├── codegen/          # Generated API clients from OpenAPI specs
+│   │   ├── app_management/
+│   │   ├── message_bus/
+│   │   ├── casaos/
+│   │   ├── local_storage/
+│   │   └── user_service/
+│   └── go.mod
+├── go.mod                # Top-level module
+└── README.md
 ```
 
 ## Pair With
 
 - **[casaos-webhook-emitter](https://github.com/ChonSong/casaos-webhook-emitter)** — Subscribes to CasaOS MessageBus and fans events out as HTTP webhooks to registered agent endpoints.
-
-## License
-
-MIT — See [LICENSE](./LICENSE) (same as upstream CasaOS-CLI)
